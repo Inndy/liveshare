@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"io"
 	"sync"
 
@@ -14,6 +15,7 @@ type FileRequest struct {
 	Offset    int64
 	Writer    io.Writer
 	Done      chan error
+	Ctx       context.Context
 }
 
 type ShareItem struct {
@@ -22,6 +24,7 @@ type ShareItem struct {
 	FileName  string
 	FileSize  int64
 	OneTime   bool
+	NoCache   bool
 	Cache     []byte
 	CacheDone bool
 	Conn      *websocket.Conn

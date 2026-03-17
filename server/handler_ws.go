@@ -1,14 +1,15 @@
 package server
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.inndy.tw/base256"
 
 	"liveshare/protocol"
 )
@@ -55,13 +56,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shareID := uuid.NewString()[:8]
+	idBytes := make([]byte, 4)
+	rand.Read(idBytes)
+	shareID := base256.Encode(idBytes, "-")
 	item := &ShareItem{
 		Token:    token,
 		ShareID:  shareID,
 		FileName: msg.FileName,
 		FileSize: msg.FileSize,
 		OneTime:  msg.OneTime,
+		NoCache:  msg.NoCache,
 		Conn:     conn,
 		reqCh:    make(chan *FileRequest, 16),
 	}
@@ -144,45 +148,71 @@ func (s *Server) processFileRequest(item *ShareItem, req *FileRequest, msgCh <-c
 		return err
 	}
 
+	shouldCache := !item.OneTime && !item.NoCache && !item.CacheDone && req.Offset == 0
+
+	for {
+		select {
+		case <-req.Ctx.Done():
+			drainRequest(msgCh)
+			return req.Ctx.Err()
+		case m, ok := <-msgCh:
+			if !ok {
+				return fmt.Errorf("connection closed during transfer")
+			}
+
+			if m.msgType == websocket.TextMessage {
+				var resp protocol.Message
+				if err := json.Unmarshal(m.data, &resp); err != nil {
+					return err
+				}
+				switch resp.Type {
+				case protocol.MsgFileHeader:
+					continue
+				case protocol.MsgFileEnd:
+					return nil
+				case protocol.MsgError:
+					return fmt.Errorf("client error: %s", resp.Error)
+				}
+			}
+
+			if m.msgType == websocket.BinaryMessage {
+				if shouldCache {
+					remaining := maxCacheSize - len(item.Cache)
+					if remaining > 0 {
+						toCache := m.data
+						if len(toCache) > remaining {
+							toCache = toCache[:remaining]
+						}
+						item.Cache = append(item.Cache, toCache...)
+						if len(item.Cache) >= maxCacheSize {
+							item.CacheDone = true
+						}
+					}
+				}
+
+				if _, err := req.Writer.Write(m.data); err != nil {
+					drainRequest(msgCh)
+					return err
+				}
+				if f, ok := req.Writer.(http.Flusher); ok {
+					f.Flush()
+				}
+			}
+		}
+	}
+}
+
+func drainRequest(msgCh <-chan wsMsg) {
 	for m := range msgCh {
 		if m.msgType == websocket.TextMessage {
 			var resp protocol.Message
 			if err := json.Unmarshal(m.data, &resp); err != nil {
-				return err
+				return
 			}
 			switch resp.Type {
-			case protocol.MsgFileHeader:
-				continue
-			case protocol.MsgFileEnd:
-				return nil
-			case protocol.MsgError:
-				return fmt.Errorf("client error: %s", resp.Error)
-			}
-		}
-
-		if m.msgType == websocket.BinaryMessage {
-			if !item.OneTime && !item.CacheDone && req.Offset == 0 {
-				remaining := maxCacheSize - len(item.Cache)
-				if remaining > 0 {
-					toCache := m.data
-					if len(toCache) > remaining {
-						toCache = toCache[:remaining]
-					}
-					item.Cache = append(item.Cache, toCache...)
-					if len(item.Cache) >= maxCacheSize {
-						item.CacheDone = true
-					}
-				}
-			}
-
-			if _, err := req.Writer.Write(m.data); err != nil {
-				return err
-			}
-			if f, ok := req.Writer.(http.Flusher); ok {
-				f.Flush()
+			case protocol.MsgFileEnd, protocol.MsgError:
+				return
 			}
 		}
 	}
-
-	return fmt.Errorf("connection closed during transfer")
 }

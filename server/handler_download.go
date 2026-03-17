@@ -1,11 +1,11 @@
 package server
 
 import (
+	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"net/http"
-
-	"github.com/google/uuid"
 )
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -23,41 +23,47 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 
-	cacheLen := int64(len(item.Cache))
-	if cacheLen > 0 {
-		if _, err := w.Write(item.Cache); err != nil {
-			slog.Error("write cache failed", "err", err)
+	var cacheLen int64
+	if !item.NoCache {
+		cacheLen = int64(len(item.Cache))
+		if cacheLen > 0 {
+			if _, err := w.Write(item.Cache); err != nil {
+				slog.Error("write cache failed", "err", err)
+				return
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+
+		if item.FileSize > 0 && cacheLen >= item.FileSize {
 			return
 		}
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
 	}
 
-	if item.FileSize > 0 && cacheLen >= item.FileSize {
-		return
-	}
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
 
-	reqID := uuid.NewString()
+	var reqId [8]byte
+
+	// safe to ignore error since go1.20. read.Read never fail
+	rand.Read(reqId[:])
 	req := &FileRequest{
-		RequestID: reqID,
+		RequestID: fmt.Sprintf("%x", reqId),
 		Offset:    cacheLen,
 		Writer:    w,
 		Done:      make(chan error, 1),
+		Ctx:       ctx,
 	}
 
 	select {
 	case item.reqCh <- req:
-	case <-r.Context().Done():
+	case <-ctx.Done():
 		return
 	}
 
-	select {
-	case err := <-req.Done:
-		if err != nil {
-			slog.Error("file transfer error", "err", err, "share_id", shareID)
-		}
-	case <-r.Context().Done():
-		slog.Info("download cancelled by client", "share_id", shareID)
+	err := <-req.Done
+	if err != nil {
+		slog.Error("file transfer error", "err", err, "share_id", shareID)
 	}
 }

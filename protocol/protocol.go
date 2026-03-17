@@ -19,5 +19,6 @@ type Message struct {
 	FileSize  int64   `json:"file_size,omitempty"`
 	Offset    int64   `json:"offset,omitempty"`
 	OneTime   bool    `json:"one_time,omitempty"`
+	NoCache   bool    `json:"no_cache,omitempty"`
 	Error     string  `json:"error,omitempty"`
 }
