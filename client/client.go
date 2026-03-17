@@ -1,11 +1,15 @@
 package client
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/gorilla/websocket"
 
@@ -13,15 +17,18 @@ import (
 )
 
 type Client struct {
-	Conn     *websocket.Conn
-	FilePath string
-	FileName string
-	FileSize int64
-	ShareID  string
-	OneTime  bool
+	Conn        *websocket.Conn
+	FilePath    string
+	FileName    string
+	FileSize    int64
+	ShareID     string
+	OneTime     bool
+	NoCache     bool
+	ArchiveMode string // "", "zip", "tar", "tgz"
+	ArchivePaths []string
 }
 
-func New(serverURL, filePath, displayName string, oneTime bool) (*Client, error) {
+func New(serverURL, filePath, displayName string, oneTime, noCache bool) (*Client, error) {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("stat file: %w", err)
@@ -38,6 +45,36 @@ func New(serverURL, filePath, displayName string, oneTime bool) (*Client, error)
 		FileName: displayName,
 		FileSize: info.Size(),
 		OneTime:  oneTime,
+		NoCache:  noCache,
+	}
+
+	if err := c.register(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	return c, nil
+}
+
+func NewArchive(serverURL string, paths []string, displayName, mode string) (*Client, error) {
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			return nil, fmt.Errorf("stat %s: %w", p, err)
+		}
+	}
+
+	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dial: %w", err)
+	}
+
+	c := &Client{
+		Conn:         conn,
+		FileName:     displayName,
+		FileSize:     0,
+		NoCache:      true,
+		ArchiveMode:  mode,
+		ArchivePaths: paths,
 	}
 
 	if err := c.register(); err != nil {
@@ -54,6 +91,7 @@ func (c *Client) register() error {
 		FileName: c.FileName,
 		FileSize: c.FileSize,
 		OneTime:  c.OneTime,
+		NoCache:  c.NoCache,
 	}
 	if err := c.Conn.WriteJSON(msg); err != nil {
 		return fmt.Errorf("send register: %w", err)
@@ -97,7 +135,18 @@ func (c *Client) Run() error {
 
 		switch msg.Type {
 		case protocol.MsgFileRequest:
-			if err := c.handleFileRequest(msg); err != nil {
+			var handleErr error
+			switch c.ArchiveMode {
+			case "zip":
+				handleErr = c.handleArchiveRequest(msg, c.writeZipStream)
+			case "tar":
+				handleErr = c.handleArchiveRequest(msg, c.writeTarStream)
+			case "tgz":
+				handleErr = c.handleArchiveRequest(msg, c.writeTgzStream)
+			default:
+				handleErr = c.handleFileRequest(msg)
+			}
+			if err := handleErr; err != nil {
 				slog.Error("file request failed", "err", err, "request_id", msg.RequestID)
 				errMsg := protocol.Message{
 					Type:      protocol.MsgError,
@@ -137,6 +186,7 @@ func (c *Client) handleFileRequest(msg protocol.Message) error {
 	if err := c.Conn.WriteJSON(header); err != nil {
 		return err
 	}
+	slog.Info("streaming file", "file", c.FileName, "request_id", msg.RequestID)
 
 	buf := make([]byte, 64*1024)
 	for {
@@ -154,9 +204,178 @@ func (c *Client) handleFileRequest(msg protocol.Message) error {
 		}
 	}
 
+	slog.Info("streaming complete", "file", c.FileName, "request_id", msg.RequestID)
 	end := protocol.Message{
 		Type:      protocol.MsgFileEnd,
 		RequestID: msg.RequestID,
 	}
 	return c.Conn.WriteJSON(end)
+}
+
+func (c *Client) handleArchiveRequest(msg protocol.Message, streamFn func(pw *io.PipeWriter)) error {
+	header := protocol.Message{
+		Type:      protocol.MsgFileHeader,
+		RequestID: msg.RequestID,
+		FileName:  c.FileName,
+	}
+	if err := c.Conn.WriteJSON(header); err != nil {
+		return err
+	}
+	slog.Info("streaming archive", "file", c.FileName, "request_id", msg.RequestID)
+
+	pr, pw := io.Pipe()
+	go streamFn(pw)
+
+	buf := make([]byte, 64*1024)
+	for {
+		n, err := pr.Read(buf)
+		if n > 0 {
+			if writeErr := c.Conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+				pr.Close()
+				return writeErr
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	slog.Info("streaming complete", "file", c.FileName, "request_id", msg.RequestID)
+	end := protocol.Message{
+		Type:      protocol.MsgFileEnd,
+		RequestID: msg.RequestID,
+	}
+	return c.Conn.WriteJSON(end)
+}
+
+func (c *Client) writeZipStream(pw *io.PipeWriter) {
+	zw := zip.NewWriter(pw)
+	var err error
+	for _, p := range c.ArchivePaths {
+		if err = addToZip(zw, p); err != nil {
+			break
+		}
+	}
+	zw.Close()
+	pw.CloseWithError(err)
+}
+
+func (c *Client) writeTarStream(pw *io.PipeWriter) {
+	tw := tar.NewWriter(pw)
+	var err error
+	for _, p := range c.ArchivePaths {
+		if err = addToTar(tw, p); err != nil {
+			break
+		}
+	}
+	tw.Close()
+	pw.CloseWithError(err)
+}
+
+func (c *Client) writeTgzStream(pw *io.PipeWriter) {
+	gw := gzip.NewWriter(pw)
+	tw := tar.NewWriter(gw)
+	var err error
+	for _, p := range c.ArchivePaths {
+		if err = addToTar(tw, p); err != nil {
+			break
+		}
+	}
+	tw.Close()
+	gw.Close()
+	pw.CloseWithError(err)
+}
+
+func addToZip(zw *zip.Writer, rootPath string) error {
+	info, err := os.Stat(rootPath)
+	if err != nil {
+		return err
+	}
+
+	if !info.IsDir() {
+		w, err := zw.Create(filepath.Base(rootPath))
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(rootPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(w, f)
+		return err
+	}
+
+	base := filepath.Dir(rootPath)
+	return filepath.Walk(rootPath, func(path string, fi os.FileInfo, err error) error {
+		if err != nil || fi.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(base, path)
+		if err != nil {
+			return err
+		}
+		w, err := zw.Create(rel)
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(w, f)
+		return err
+	})
+}
+
+func addToTar(tw *tar.Writer, rootPath string) error {
+	info, err := os.Stat(rootPath)
+	if err != nil {
+		return err
+	}
+
+	if !info.IsDir() {
+		return tarFile(tw, rootPath, filepath.Base(rootPath))
+	}
+
+	base := filepath.Dir(rootPath)
+	return filepath.Walk(rootPath, func(path string, fi os.FileInfo, err error) error {
+		if err != nil || fi.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(base, path)
+		if err != nil {
+			return err
+		}
+		return tarFile(tw, path, rel)
+	})
+}
+
+func tarFile(tw *tar.Writer, filePath, name string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	hdr, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+	hdr.Name = name
+
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	_, err = io.Copy(tw, f)
+	return err
 }
