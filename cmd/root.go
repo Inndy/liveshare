@@ -6,9 +6,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var Version = "dev"
+
 var rootCmd = &cobra.Command{
-	Use:   "liveshare",
-	Short: "Share files over HTTP via WebSocket relay",
+	Use:     "liveshare",
+	Short:   "Share files over HTTP via WebSocket relay",
+	Version: Version,
 }
 
 func init() {
