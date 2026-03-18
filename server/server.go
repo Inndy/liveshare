@@ -128,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ws/{token}", s.handleWS)
 	mux.HandleFunc("GET /d/{id}/{filename}", s.handleDownload)
+	mux.Handle("GET /", http.RedirectHandler("https://github.com/Inndy/liveshare", http.StatusFound))
 	return mux
 }
 
