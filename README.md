@@ -55,6 +55,12 @@ Shares files via an existing token.
 --tgz          Archive as gzipped tar
 --timeout      Auto-disconnect after duration (e.g., 30m, 1h)
 --qr           Display QR code for the download URL
+--persist      Deterministic share ID (same URL on reconnect)
+--dir          Serve directory as static files
+--dir-list     Enable directory listing (requires --dir)
+--html         Serve with Content-Type: text/html
+--text         Serve with Content-Type: text/plain
+--mime <type>  Serve with custom Content-Type
 ```
 
 **Single file:**
@@ -81,6 +87,23 @@ liveshare share --server host/ws/TOKEN --tgz file1.txt file2.txt
 **One-time share with QR code and 30-minute timeout:**
 ```bash
 liveshare share --server host/ws/TOKEN --once --qr --timeout 30m secret.pdf
+```
+
+**Serve a folder as static files (with directory listing):**
+```bash
+liveshare share --server host/ws/TOKEN --dir --dir-list ./public
+```
+
+**Persist mode (stable URL that survives reconnects):**
+```bash
+liveshare share --server host/ws/TOKEN --persist notes.md
+```
+
+**Custom MIME type (inline in browser):**
+```bash
+liveshare share --server host/ws/TOKEN --html page.html
+liveshare share --server host/ws/TOKEN --text log.txt
+liveshare share --server host/ws/TOKEN --mime "application/pdf" doc.pdf
 ```
 
 ### `liveshare create [name]`
