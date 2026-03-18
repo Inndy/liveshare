@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"liveshare/web"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -128,7 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ws/{token}", s.handleWS)
 	mux.HandleFunc("GET /d/{id}/{path...}", s.handleDownload)
-	mux.Handle("GET /", http.RedirectHandler("https://github.com/Inndy/liveshare", http.StatusFound))
+	mux.Handle("GET /", web.Handler())
 	return mux
 }
 

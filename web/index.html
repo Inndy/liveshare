@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liveshare File Connect</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- CSS_INJECTION_POINT --><link href="style.css" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-grid-pattern pattern-overlay"></div>
+    <div class="glow-orb" style="top: -10%; left: -10%;"></div>
+    <div class="glow-orb" style="bottom: -10%; right: -10%; background: var(--accent-gold); opacity: 0.05;"></div>
+
+    <main class="container">
+        <header class="hero">
+            <h1 class="font-heading animate-float">Live<span class="gradient-text">Share</span></h1>
+            <p class="font-body text-muted mt-2">A file sharing tunnel</p>
+        </header>
+
+        <section class="card glass-panel" id="main-card">
+            <form id="share-form" class="form-container">
+                <div class="input-group">
+                    <label for="token" class="font-mono text-muted text-sm">Server Token</label>
+                    <input type="text" id="token" class="font-mono input-field" placeholder="Enter your token..." required>
+                </div>
+
+                <div class="input-group file-group mt-2">
+                    <label for="file-input" class="font-mono text-muted text-sm">Target File</label>
+                    <div class="file-upload-area" id="drop-zone">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-orange mb-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                        <span class="font-body" id="file-name-display">Click or drag a file to share</span>
+                        <input type="file" id="file-input" class="hidden-input" required>
+                    </div>
+                </div>
+
+                <div class="mt-4 flex justify-center">
+                    <button type="submit" class="btn-primary" id="share-btn">
+                        <span class="font-body uppercase tracking-wider">Start Sharing Session</span>
+                    </button>
+                </div>
+            </form>
+
+            <div id="status-panel" class="status-panel hidden mt-8 pt-8 border-t border-dim">
+                <h3 class="font-heading text-lg mb-4 text-center">Session Active</h3>
+
+                <div class="share-url-container mb-6">
+                    <p class="font-mono text-xs text-muted mb-2">Shareable Link</p>
+                    <div class="url-copy-box">
+                        <input type="text" readonly id="share-url" class="font-mono text-sm w-full bg-transparent border-none text-white focus:outline-none" value="">
+                        <button type="button" id="copy-btn" class="btn-ghost" title="Copy link">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <span class="stat-label">Status</span>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span class="status-dot animate-ping-slow"></span>
+                            <span class="font-mono text-sm" id="connection-status">Connected</span>
+                        </div>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">File Size</span>
+                        <span class="font-mono text-sm text-gold mt-1" id="file-size-display">-</span>
+                    </div>
+                </div>
+
+                <div class="mt-8 text-center">
+                    <button type="button" class="btn-outline text-sm" id="stop-btn">Terminate Session</button>
+                </div>
+            </div>
+        </section>
+
+        <footer class="mt-8 flex justify-center">
+            <a href="https://github.com/Inndy/liveshare" target="_blank" rel="noopener noreferrer" class="btn-ghost flex items-center gap-2 font-mono text-xs" style="text-decoration: none;">
+                GitHub
+            </a>
+        </footer>
+    </main>
+
+    <!-- JS_INJECTION_POINT --><script src="app.js"></script>
+</body>
+</html>
