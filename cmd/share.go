@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"liveshare/client"
+	"liveshare/config"
 )
 
 var shareCmd = &cobra.Command{
@@ -33,7 +34,6 @@ func init() {
 	shareCmd.Flags().Bool("tgz", false, "Archive as gzipped tar")
 	shareCmd.Flags().Duration("timeout", 0, "Auto-disconnect after duration (e.g., 30m, 1h)")
 	shareCmd.Flags().Bool("qr", false, "Display QR code for the download URL")
-	shareCmd.MarkFlagRequired("server")
 }
 
 func parseServerURL(raw string) (string, error) {
@@ -65,6 +65,22 @@ func runShare(cmd *cobra.Command, args []string) error {
 	useTgz, _ := cmd.Flags().GetBool("tgz")
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 	showQR, _ := cmd.Flags().GetBool("qr")
+
+	if serverRaw != "" {
+		cc := &config.ClientConfig{Server: serverRaw}
+		if err := cc.Save(); err != nil {
+			slog.Warn("failed to save client config", "error", err)
+		}
+	} else {
+		cc, err := config.LoadClientConfig()
+		if err != nil {
+			return fmt.Errorf("load client config: %w", err)
+		}
+		if cc.Server == "" {
+			return fmt.Errorf("no server specified; use --server or run once with --server to save it")
+		}
+		serverRaw = cc.Server
+	}
 
 	wsURL, err := parseServerURL(serverRaw)
 	if err != nil {
