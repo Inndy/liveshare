@@ -10,9 +10,6 @@ func TestStore_SetAndGet(t *testing.T) {
 	item := &ShareItem{Token: "tok1", ShareID: "sid1"}
 	s.Set(item)
 
-	if got := s.GetByToken("tok1"); got != item {
-		t.Fatal("GetByToken returned wrong item")
-	}
 	if got := s.GetByShareID("sid1"); got != item {
 		t.Fatal("GetByShareID returned wrong item")
 	}
@@ -24,9 +21,6 @@ func TestStore_Delete_NonPersist(t *testing.T) {
 	s.Set(item)
 	s.Delete(item)
 
-	if got := s.GetByToken("tok1"); got != nil {
-		t.Fatal("GetByToken should return nil after delete")
-	}
 	if got := s.GetByShareID("sid1"); got != nil {
 		t.Fatal("GetByShareID should return nil after delete")
 	}
@@ -45,9 +39,6 @@ func TestStore_Delete_Persist(t *testing.T) {
 	s.Set(item)
 	s.Delete(item)
 
-	if got := s.GetByToken("tok1"); got != nil {
-		t.Fatal("GetByToken should return nil after persist delete")
-	}
 	got := s.GetByShareID("sid1")
 	if got == nil {
 		t.Fatal("GetByShareID should still return item for persist")
@@ -73,12 +64,11 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			s.GetByToken("t" + id)
 			s.GetByShareID("s" + id)
 		}()
 		go func() {
 			defer wg.Done()
-			item := s.GetByToken("t" + id)
+			item := s.GetByShareID("s" + id)
 			if item != nil {
 				s.Delete(item)
 			}

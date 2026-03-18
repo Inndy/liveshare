@@ -38,22 +38,14 @@ type ShareItem struct {
 }
 
 type Store struct {
-	mu       sync.RWMutex
-	byToken  map[string]*ShareItem
+	mu        sync.RWMutex
 	byShareID map[string]*ShareItem
 }
 
 func NewStore() *Store {
 	return &Store{
-		byToken:   make(map[string]*ShareItem),
 		byShareID: make(map[string]*ShareItem),
 	}
-}
-
-func (s *Store) GetByToken(token string) *ShareItem {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.byToken[token]
 }
 
 func (s *Store) GetByShareID(id string) *ShareItem {
@@ -65,14 +57,12 @@ func (s *Store) GetByShareID(id string) *ShareItem {
 func (s *Store) Set(item *ShareItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.byToken[item.Token] = item
 	s.byShareID[item.ShareID] = item
 }
 
 func (s *Store) Delete(item *ShareItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.byToken, item.Token)
 	if item.Persist {
 		item.Conn = nil
 		item.reqCh = nil

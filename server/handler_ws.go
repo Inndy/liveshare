@@ -31,11 +31,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existing := s.Store.GetByToken(token); existing != nil {
-		http.Error(w, "token already in use", http.StatusConflict)
-		return
-	}
-
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("websocket upgrade failed", "err", err)

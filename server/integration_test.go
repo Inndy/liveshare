@@ -378,33 +378,34 @@ func TestIntegration_Persist_Reconnect(t *testing.T) {
 	}
 }
 
-func TestIntegration_Persist_RejectActiveCollision(t *testing.T) {
-	env := newTestEnv(t, "tok1", "tok2")
+func TestIntegration_SameToken_MultipleConcurrentShares(t *testing.T) {
+	env := newTestEnv(t, "tok1")
 
-	conn1, _ := env.connectAndRegister("tok1", protocol.Message{
-		FileName: "hello.txt",
-		Persist:  true,
-	})
-	defer conn1.Close()
+	content1 := "file one content"
+	content2 := "file two content"
 
-	// Start wsLoop in background so the conn stays alive
-	go func() {
-		for {
-			_, _, err := conn1.ReadMessage()
-			if err != nil {
-				return
-			}
-		}
-	}()
+	shareID1 := fakeClient(t, env, "tok1", protocol.Message{
+		FileName: "file1.txt",
+		FileSize: int64(len(content1)),
+	}, simpleFileHandler(content1))
 
-	// Second connect with same token should get 409
-	resp, err := http.Get(env.httpSrv.URL + "/ws/tok1")
-	if err != nil {
-		t.Fatal(err)
+	shareID2 := fakeClient(t, env, "tok1", protocol.Message{
+		FileName: "file2.txt",
+		FileSize: int64(len(content2)),
+	}, simpleFileHandler(content2))
+
+	if shareID1 == shareID2 {
+		t.Fatal("two shares with same token should have different share IDs")
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("expected 409, got %d", resp.StatusCode)
+
+	body1 := readBody(t, httpGet(t, env.downloadURL(shareID1, "file1.txt")))
+	if body1 != content1 {
+		t.Fatalf("share1 body = %q, want %q", body1, content1)
+	}
+
+	body2 := readBody(t, httpGet(t, env.downloadURL(shareID2, "file2.txt")))
+	if body2 != content2 {
+		t.Fatalf("share2 body = %q, want %q", body2, content2)
 	}
 }
 
