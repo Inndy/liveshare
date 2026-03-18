@@ -16,6 +16,7 @@ import (
 )
 
 const pingInterval = 30 * time.Second
+const persistShareIdSize = 6
 
 type wsMsg struct {
 	msgType int
@@ -60,7 +61,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	var shareID string
 	if msg.Persist {
 		h := sha256.Sum256([]byte(token + "/" + msg.FileName))
-		shareID = base256.Encode(h[:4], "-")
+		shareID = base256.Encode(h[:persistShareIdSize], "-")
 
 		if existing := s.Store.GetByShareID(shareID); existing != nil && existing.Conn != nil {
 			errResp := protocol.Message{Type: protocol.MsgError, Error: "share ID already active"}

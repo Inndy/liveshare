@@ -318,7 +318,7 @@ func TestIntegration_Persist_DeterministicID(t *testing.T) {
 	})
 
 	h := sha256.Sum256([]byte("tok1/hello.txt"))
-	expected := base256.Encode(h[:4], "-")
+	expected := base256.Encode(h[:persistShareIdSize], "-")
 	if resp.ShareID != expected {
 		t.Fatalf("shareID = %q, want %q", resp.ShareID, expected)
 	}
