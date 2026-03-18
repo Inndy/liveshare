@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"slices"
 
 	"github.com/spf13/cobra"
 )
@@ -29,12 +30,8 @@ func Execute() error {
 				known = true
 				break
 			}
-			for _, alias := range cmd.Aliases {
-				if alias == firstArg {
-					known = true
-					break
-				}
-			}
+
+			known = known || slices.Contains(cmd.Aliases, firstArg)
 		}
 		if !known && firstArg != "help" && firstArg != "completion" {
 			rootCmd.SetArgs(append([]string{"share"}, args...))
