@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -56,9 +57,23 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idBytes := make([]byte, 4)
-	rand.Read(idBytes)
-	shareID := base256.Encode(idBytes, "-")
+	var shareID string
+	if msg.Persist {
+		h := sha256.Sum256([]byte(token + "/" + msg.FileName))
+		shareID = base256.Encode(h[:4], "-")
+
+		if existing := s.Store.GetByShareID(shareID); existing != nil && existing.Conn != nil {
+			errResp := protocol.Message{Type: protocol.MsgError, Error: "share ID already active"}
+			conn.WriteJSON(errResp)
+			conn.Close()
+			return
+		}
+	} else {
+		idBytes := make([]byte, 4)
+		rand.Read(idBytes)
+		shareID = base256.Encode(idBytes, "-")
+	}
+
 	item := &ShareItem{
 		Token:    token,
 		ShareID:  shareID,
@@ -66,6 +81,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		FileSize: msg.FileSize,
 		OneTime:  msg.OneTime,
 		NoCache:  msg.NoCache,
+		Persist:  msg.Persist,
+		DirMode:  msg.DirMode,
+		MimeType: msg.MimeType,
 		Conn:     conn,
 		reqCh:    make(chan *FileRequest, 16),
 	}
@@ -85,9 +103,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) wsLoop(item *ShareItem) {
+	conn := item.Conn
 	defer func() {
 		s.Store.Delete(item)
-		item.Conn.Close()
+		conn.Close()
 		slog.Info("client disconnected", "token", item.Token, "share_id", item.ShareID)
 	}()
 
@@ -143,12 +162,13 @@ func (s *Server) processFileRequest(item *ShareItem, req *FileRequest, msgCh <-c
 		Type:      protocol.MsgFileRequest,
 		RequestID: req.RequestID,
 		Offset:    req.Offset,
+		FilePath:  req.FilePath,
 	}
 	if err := item.Conn.WriteJSON(msg); err != nil {
 		return err
 	}
 
-	shouldCache := !item.OneTime && !item.NoCache && !item.CacheDone && req.Offset == 0
+	shouldCache := !item.OneTime && !item.NoCache && !item.DirMode && !item.CacheDone && req.Offset == 0
 
 	for {
 		select {
@@ -167,6 +187,9 @@ func (s *Server) processFileRequest(item *ShareItem, req *FileRequest, msgCh <-c
 				}
 				switch resp.Type {
 				case protocol.MsgFileHeader:
+					if resp.MimeType != "" {
+						req.MimeType = resp.MimeType
+					}
 					continue
 				case protocol.MsgFileEnd:
 					return nil

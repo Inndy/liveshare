@@ -6,10 +6,13 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
+	"mime"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/websocket"
 
@@ -17,18 +20,24 @@ import (
 )
 
 type Client struct {
-	Conn        *websocket.Conn
-	FilePath    string
-	FileName    string
-	FileSize    int64
-	ShareID     string
-	OneTime     bool
-	NoCache     bool
-	ArchiveMode string // "", "zip", "tar", "tgz"
+	Conn         *websocket.Conn
+	ServerURL    string
+	FilePath     string
+	FileName     string
+	FileSize     int64
+	ShareID      string
+	OneTime      bool
+	NoCache      bool
+	Persist      bool
+	DirMode      bool
+	DirList      bool
+	MimeType     string
+	ArchiveMode  string // "", "zip", "tar", "tgz"
 	ArchivePaths []string
+	dirRoot      *os.Root
 }
 
-func New(serverURL, filePath, displayName string, oneTime, noCache bool) (*Client, error) {
+func New(serverURL, filePath, displayName string, oneTime, noCache, persist bool, mimeType string) (*Client, error) {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("stat file: %w", err)
@@ -40,12 +49,15 @@ func New(serverURL, filePath, displayName string, oneTime, noCache bool) (*Clien
 	}
 
 	c := &Client{
-		Conn:     conn,
-		FilePath: filePath,
-		FileName: displayName,
-		FileSize: info.Size(),
-		OneTime:  oneTime,
-		NoCache:  noCache,
+		Conn:      conn,
+		ServerURL: serverURL,
+		FilePath:  filePath,
+		FileName:  displayName,
+		FileSize:  info.Size(),
+		OneTime:   oneTime,
+		NoCache:   noCache,
+		Persist:   persist,
+		MimeType:  mimeType,
 	}
 
 	if err := c.register(); err != nil {
@@ -56,7 +68,7 @@ func New(serverURL, filePath, displayName string, oneTime, noCache bool) (*Clien
 	return c, nil
 }
 
-func NewArchive(serverURL string, paths []string, displayName, mode string) (*Client, error) {
+func NewArchive(serverURL string, paths []string, displayName, mode string, persist bool, mimeType string) (*Client, error) {
 	for _, p := range paths {
 		if _, err := os.Stat(p); err != nil {
 			return nil, fmt.Errorf("stat %s: %w", p, err)
@@ -70,15 +82,51 @@ func NewArchive(serverURL string, paths []string, displayName, mode string) (*Cl
 
 	c := &Client{
 		Conn:         conn,
+		ServerURL:    serverURL,
 		FileName:     displayName,
 		FileSize:     0,
 		NoCache:      true,
+		Persist:      persist,
+		MimeType:     mimeType,
 		ArchiveMode:  mode,
 		ArchivePaths: paths,
 	}
 
 	if err := c.register(); err != nil {
 		conn.Close()
+		return nil, err
+	}
+
+	return c, nil
+}
+
+func NewFolder(serverURL, dirPath, displayName string, dirList, persist bool) (*Client, error) {
+	root, err := os.OpenRoot(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("open root %s: %w", dirPath, err)
+	}
+
+	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
+	if err != nil {
+		root.Close()
+		return nil, fmt.Errorf("dial: %w", err)
+	}
+
+	c := &Client{
+		Conn:      conn,
+		ServerURL: serverURL,
+		FilePath:  dirPath,
+		FileName:  displayName,
+		DirMode:   true,
+		DirList:   dirList,
+		NoCache:   true,
+		Persist:   persist,
+		dirRoot:   root,
+	}
+
+	if err := c.register(); err != nil {
+		conn.Close()
+		root.Close()
 		return nil, err
 	}
 
@@ -92,6 +140,9 @@ func (c *Client) register() error {
 		FileSize: c.FileSize,
 		OneTime:  c.OneTime,
 		NoCache:  c.NoCache,
+		Persist:  c.Persist,
+		DirMode:  c.DirMode,
+		MimeType: c.MimeType,
 	}
 	if err := c.Conn.WriteJSON(msg); err != nil {
 		return fmt.Errorf("send register: %w", err)
@@ -120,6 +171,9 @@ func (c *Client) register() error {
 
 func (c *Client) Run() error {
 	defer c.Conn.Close()
+	if c.dirRoot != nil {
+		defer c.dirRoot.Close()
+	}
 
 	for {
 		_, data, err := c.Conn.ReadMessage()
@@ -136,15 +190,19 @@ func (c *Client) Run() error {
 		switch msg.Type {
 		case protocol.MsgFileRequest:
 			var handleErr error
-			switch c.ArchiveMode {
-			case "zip":
-				handleErr = c.handleArchiveRequest(msg, c.writeZipStream)
-			case "tar":
-				handleErr = c.handleArchiveRequest(msg, c.writeTarStream)
-			case "tgz":
-				handleErr = c.handleArchiveRequest(msg, c.writeTgzStream)
-			default:
-				handleErr = c.handleFileRequest(msg)
+			if c.DirMode {
+				handleErr = c.handleFolderRequest(msg)
+			} else {
+				switch c.ArchiveMode {
+				case "zip":
+					handleErr = c.handleArchiveRequest(msg, c.writeZipStream)
+				case "tar":
+					handleErr = c.handleArchiveRequest(msg, c.writeTarStream)
+				case "tgz":
+					handleErr = c.handleArchiveRequest(msg, c.writeTgzStream)
+				default:
+					handleErr = c.handleFileRequest(msg)
+				}
 			}
 			if err := handleErr; err != nil {
 				slog.Error("file request failed", "err", err, "request_id", msg.RequestID)
@@ -182,6 +240,7 @@ func (c *Client) handleFileRequest(msg protocol.Message) error {
 		RequestID: msg.RequestID,
 		FileName:  c.FileName,
 		FileSize:  c.FileSize,
+		MimeType:  c.MimeType,
 	}
 	if err := c.Conn.WriteJSON(header); err != nil {
 		return err
@@ -217,6 +276,7 @@ func (c *Client) handleArchiveRequest(msg protocol.Message, streamFn func(pw *io
 		Type:      protocol.MsgFileHeader,
 		RequestID: msg.RequestID,
 		FileName:  c.FileName,
+		MimeType:  c.MimeType,
 	}
 	if err := c.Conn.WriteJSON(header); err != nil {
 		return err
@@ -378,4 +438,172 @@ func tarFile(tw *tar.Writer, filePath, name string) error {
 	}
 	_, err = io.Copy(tw, f)
 	return err
+}
+
+func (c *Client) handleFolderRequest(msg protocol.Message) error {
+	reqPath := msg.FilePath
+	if reqPath == "" || reqPath == "/" {
+		return c.serveDirPath(msg, ".")
+	}
+
+	reqPath = strings.TrimPrefix(reqPath, "/")
+
+	if strings.HasSuffix(reqPath, "/") {
+		return c.serveDirPath(msg, reqPath)
+	}
+
+	f, err := c.dirRoot.Open(reqPath)
+	if err != nil {
+		if c.isNotExist(err) {
+			return c.sendError(msg, "not found: "+reqPath)
+		}
+		return c.sendError(msg, err.Error())
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return c.sendError(msg, err.Error())
+	}
+
+	if info.IsDir() {
+		f.Close()
+		return c.serveDirPath(msg, reqPath+"/")
+	}
+
+	mimeType := mime.TypeByExtension(filepath.Ext(reqPath))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	header := protocol.Message{
+		Type:      protocol.MsgFileHeader,
+		RequestID: msg.RequestID,
+		FileName:  filepath.Base(reqPath),
+		FileSize:  info.Size(),
+		MimeType:  mimeType,
+	}
+	if err := c.Conn.WriteJSON(header); err != nil {
+		return err
+	}
+	slog.Info("streaming file", "path", reqPath, "request_id", msg.RequestID)
+
+	buf := make([]byte, 64*1024)
+	for {
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			if writeErr := c.Conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+				return writeErr
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+
+	return c.Conn.WriteJSON(protocol.Message{Type: protocol.MsgFileEnd, RequestID: msg.RequestID})
+}
+
+func (c *Client) serveDirPath(msg protocol.Message, dirPath string) error {
+	trimmed := strings.TrimSuffix(dirPath, "/")
+	if trimmed == "" {
+		trimmed = "."
+	}
+
+	indexPath := trimmed + "/index.html"
+	if trimmed == "." {
+		indexPath = "index.html"
+	}
+	if f, err := c.dirRoot.Open(indexPath); err == nil {
+		f.Close()
+		msg.FilePath = indexPath
+		return c.handleFolderRequest(msg)
+	}
+
+	if !c.DirList {
+		return c.sendError(msg, "not found: "+dirPath)
+	}
+
+	return c.sendDirListing(msg, trimmed)
+}
+
+func (c *Client) sendDirListing(msg protocol.Message, dirPath string) error {
+	f, err := c.dirRoot.Open(dirPath)
+	if err != nil {
+		return c.sendError(msg, err.Error())
+	}
+	defer f.Close()
+
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return c.sendError(msg, err.Error())
+	}
+
+	var buf strings.Builder
+	buf.WriteString("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Index of /")
+	buf.WriteString(html.EscapeString(dirPath))
+	buf.WriteString("</title></head><body><h1>Index of /")
+	buf.WriteString(html.EscapeString(dirPath))
+	buf.WriteString("</h1><ul>")
+
+	if dirPath != "." {
+		buf.WriteString(`<li><a href="../">../</a></li>`)
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		displayName := name
+		if e.IsDir() {
+			displayName += "/"
+			name += "/"
+		}
+		buf.WriteString(`<li><a href="`)
+		buf.WriteString(html.EscapeString(name))
+		buf.WriteString(`">`)
+		buf.WriteString(html.EscapeString(displayName))
+		buf.WriteString("</a></li>")
+	}
+	buf.WriteString("</ul></body></html>")
+
+	body := buf.String()
+	header := protocol.Message{
+		Type:      protocol.MsgFileHeader,
+		RequestID: msg.RequestID,
+		FileName:  "index.html",
+		FileSize:  int64(len(body)),
+		MimeType:  "text/html; charset=utf-8",
+	}
+	if err := c.Conn.WriteJSON(header); err != nil {
+		return err
+	}
+
+	if err := c.Conn.WriteMessage(websocket.BinaryMessage, []byte(body)); err != nil {
+		return err
+	}
+
+	return c.Conn.WriteJSON(protocol.Message{Type: protocol.MsgFileEnd, RequestID: msg.RequestID})
+}
+
+func (c *Client) sendError(msg protocol.Message, errText string) error {
+	return c.Conn.WriteJSON(protocol.Message{
+		Type:      protocol.MsgError,
+		RequestID: msg.RequestID,
+		Error:     errText,
+	})
+}
+
+func (c *Client) isNotExist(err error) bool {
+	return os.IsNotExist(err)
+}
+
+func (c *Client) Reconnect() error {
+	conn, _, err := websocket.DefaultDialer.Dial(c.ServerURL, nil)
+	if err != nil {
+		return fmt.Errorf("dial: %w", err)
+	}
+	c.Conn = conn
+	return c.register()
 }

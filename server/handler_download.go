@@ -8,25 +8,63 @@ import (
 	"net/http"
 )
 
+type deferredHeaderWriter struct {
+	http.ResponseWriter
+	req         *FileRequest
+	item        *ShareItem
+	forceDl     bool
+	wroteHeader bool
+}
+
+func (dw *deferredHeaderWriter) Write(p []byte) (int, error) {
+	if !dw.wroteHeader {
+		dw.wroteHeader = true
+		setDownloadHeaders(dw.ResponseWriter, dw.item, dw.resolveMimeType(), dw.forceDl)
+	}
+	return dw.ResponseWriter.Write(p)
+}
+
+func (dw *deferredHeaderWriter) resolveMimeType() string {
+	if dw.req.MimeType != "" {
+		return dw.req.MimeType
+	}
+	return dw.item.MimeType
+}
+
+func setDownloadHeaders(w http.ResponseWriter, item *ShareItem, mimeType string, forceDl bool) {
+	if mimeType != "" && !forceDl {
+		w.Header().Set("Content-Type", mimeType)
+		w.Header().Set("Content-Disposition", "inline")
+	} else {
+		if mimeType != "" {
+			w.Header().Set("Content-Type", mimeType)
+		} else {
+			w.Header().Set("Content-Type", "application/octet-stream")
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, item.FileName))
+	}
+	if item.FileSize > 0 && !item.DirMode {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", item.FileSize))
+	}
+}
+
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	shareID := r.PathValue("id")
+	reqPath := r.PathValue("path")
 
 	item := s.Store.GetByShareID(shareID)
-	if item == nil {
+	if item == nil || item.Conn == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, item.FileName))
-	if item.FileSize > 0 {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", item.FileSize))
-	}
-	w.Header().Set("Content-Type", "application/octet-stream")
+	forceDl := r.URL.Query().Get("dl") == "1"
 
 	var cacheLen int64
-	if !item.NoCache {
+	if !item.NoCache && !item.DirMode {
 		cacheLen = int64(len(item.Cache))
 		if cacheLen > 0 {
+			setDownloadHeaders(w, item, item.MimeType, forceDl)
 			if _, err := w.Write(item.Cache); err != nil {
 				slog.Error("write cache failed", "err", err)
 				return
@@ -45,16 +83,23 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var reqId [8]byte
-
-	// safe to ignore error since go1.20. read.Read never fail
 	rand.Read(reqId[:])
 	req := &FileRequest{
 		RequestID: fmt.Sprintf("%x", reqId),
 		Offset:    cacheLen,
+		FilePath:  reqPath,
 		Writer:    w,
 		Done:      make(chan error, 1),
 		Ctx:       ctx,
 	}
+
+	dw := &deferredHeaderWriter{
+		ResponseWriter: w,
+		req:            req,
+		item:           item,
+		forceDl:        forceDl,
+	}
+	req.Writer = dw
 
 	select {
 	case item.reqCh <- req:

@@ -13,6 +13,8 @@ const maxCacheSize = 1 << 20 // 1MB
 type FileRequest struct {
 	RequestID string
 	Offset    int64
+	FilePath  string
+	MimeType  string
 	Writer    io.Writer
 	Done      chan error
 	Ctx       context.Context
@@ -25,6 +27,9 @@ type ShareItem struct {
 	FileSize  int64
 	OneTime   bool
 	NoCache   bool
+	Persist   bool
+	DirMode   bool
+	MimeType  string
 	Cache     []byte
 	CacheDone bool
 	Conn      *websocket.Conn
@@ -68,5 +73,10 @@ func (s *Store) Delete(item *ShareItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.byToken, item.Token)
-	delete(s.byShareID, item.ShareID)
+	if item.Persist {
+		item.Conn = nil
+		item.reqCh = nil
+	} else {
+		delete(s.byShareID, item.ShareID)
+	}
 }
