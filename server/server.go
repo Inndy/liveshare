@@ -16,8 +16,9 @@ import (
 )
 
 type Server struct {
-	Store    *Store
-	Upgrader websocket.Upgrader
+	Store        *Store
+	Upgrader     websocket.Upgrader
+	MaxCacheSize int
 
 	tokenMu      sync.RWMutex
 	tokens       map[string]string // token -> name
@@ -124,6 +125,13 @@ func (s *Server) TokenCount() int {
 	s.tokenMu.RLock()
 	defer s.tokenMu.RUnlock()
 	return len(s.tokens)
+}
+
+func (s *Server) maxCacheSize() int {
+	if s.MaxCacheSize > 0 {
+		return s.MaxCacheSize
+	}
+	return defaultMaxCacheSize
 }
 
 func (s *Server) Handler() http.Handler {

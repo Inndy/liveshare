@@ -85,7 +85,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Store.Set(item)
 
-	resp := protocol.Message{Type: protocol.MsgRegistered, ShareID: shareID}
+	resp := protocol.Message{Type: protocol.MsgRegistered, Version: protocol.Version, ShareID: shareID}
 	if err := conn.WriteJSON(resp); err != nil {
 		slog.Error("write registered response failed", "err", err)
 		s.Store.Delete(item)
@@ -164,6 +164,7 @@ func (s *Server) processFileRequest(item *ShareItem, req *FileRequest, msgCh <-c
 		return err
 	}
 
+	maxCache := s.maxCacheSize()
 	shouldCache := !item.OneTime && !item.NoCache && !item.DirMode && !item.CacheDone && req.Offset == 0
 
 	for {
@@ -196,14 +197,14 @@ func (s *Server) processFileRequest(item *ShareItem, req *FileRequest, msgCh <-c
 
 			if m.msgType == websocket.BinaryMessage {
 				if shouldCache {
-					remaining := maxCacheSize - len(item.Cache)
+					remaining := maxCache - len(item.Cache)
 					if remaining > 0 {
 						toCache := m.data
 						if len(toCache) > remaining {
 							toCache = toCache[:remaining]
 						}
 						item.Cache = append(item.Cache, toCache...)
-						if len(item.Cache) >= maxCacheSize {
+						if len(item.Cache) >= maxCache {
 							item.CacheDone = true
 						}
 					}

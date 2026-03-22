@@ -27,6 +27,7 @@ func init() {
 	hostCmd.Flags().String("cf-token", "", "Cloudflare tunnel token")
 	hostCmd.Flags().String("token-file", "", "Path to token file")
 	hostCmd.Flags().Bool("tunnel", false, "Start a cloudflared quick tunnel")
+	hostCmd.Flags().Int("max-cache-size", 0, "Max cache size per share in bytes (default 1MB)")
 	hostCmd.Flags().String("config", config.DefaultConfigFile, "Config file path")
 }
 
@@ -52,17 +53,21 @@ func runHost(cmd *cobra.Command, args []string) error {
 	if v, _ := cmd.Flags().GetString("token-file"); v != "" {
 		cfg.TokenFile = v
 	}
+	if v, _ := cmd.Flags().GetInt("max-cache-size"); v != 0 {
+		cfg.MaxCacheSize = v
+	}
 	cfg.ApplyDefaults()
 
 	if cmd.Flags().Changed("hostname") || cmd.Flags().Changed("listen") ||
 		cmd.Flags().Changed("port") || cmd.Flags().Changed("cf-token") ||
-		cmd.Flags().Changed("token-file") {
+		cmd.Flags().Changed("token-file") || cmd.Flags().Changed("max-cache-size") {
 		if err := cfg.Save(cfgPath); err != nil {
 			slog.Warn("could not save config", "err", err)
 		}
 	}
 
 	srv := server.New()
+	srv.MaxCacheSize = cfg.MaxCacheSize
 	if err := srv.LoadTokens(cfg.TokenFile); err != nil {
 		return fmt.Errorf("load tokens: %w", err)
 	}

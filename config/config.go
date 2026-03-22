@@ -10,11 +10,12 @@ import (
 const DefaultConfigFile = "liveshare.json"
 
 type Config struct {
-	Hostname  string `json:"hostname,omitempty"`
-	Listen    string `json:"listen,omitempty"`
-	Port      int    `json:"port,omitempty"`
-	CfToken   string `json:"cf_token,omitempty"`
-	TokenFile string `json:"token_file,omitempty"`
+	Hostname     string `json:"hostname,omitempty"`
+	Listen       string `json:"listen,omitempty"`
+	Port         int    `json:"port,omitempty"`
+	CfToken      string `json:"cf_token,omitempty"`
+	TokenFile    string `json:"token_file,omitempty"`
+	MaxCacheSize int    `json:"max_cache_size,omitempty"`
 }
 
 func Load(path string) (*Config, error) {
