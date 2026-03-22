@@ -136,6 +136,7 @@ func NewFolder(serverURL, dirPath, displayName string, dirList, persist bool) (*
 func (c *Client) register() error {
 	msg := protocol.Message{
 		Type:     protocol.MsgRegister,
+		Version:  protocol.Version,
 		FileName: c.FileName,
 		FileSize: c.FileSize,
 		OneTime:  c.OneTime,

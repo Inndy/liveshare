@@ -1,5 +1,7 @@
 package protocol
 
+const Version = 1
+
 type MsgType string
 
 const (
@@ -13,6 +15,7 @@ const (
 
 type Message struct {
 	Type      MsgType `json:"type"`
+	Version   int     `json:"v,omitempty"`
 	RequestID string  `json:"request_id,omitempty"`
 	ShareID   string  `json:"share_id,omitempty"`
 	FileName  string  `json:"file_name,omitempty"`

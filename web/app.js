@@ -91,9 +91,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ws.onopen = () => {
             connectionStatus.textContent = 'Registering...';
 
-            // Send MsgRegister
             const registerMsg = {
                 type: 'register',
+                v: 1,
                 file_name: file.name,
                 file_size: file.size,
                 one_time: false,
