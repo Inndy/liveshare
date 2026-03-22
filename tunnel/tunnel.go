@@ -17,12 +17,16 @@ type Tunnel struct {
 func Start(port int, cfToken string) (*Tunnel, error) {
 	args := []string{"tunnel"}
 	if cfToken != "" {
-		args = append(args, "run", "--token", cfToken)
+		args = append(args, "run")
 	} else {
 		args = append(args, "--url", fmt.Sprintf("http://localhost:%d", port))
 	}
 
 	cmd := exec.Command("cloudflared", args...)
+
+	if cfToken != "" {
+		cmd.Env = append(cmd.Env, "TUNNEL_TOKEN=" + cfToken)
+	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
