@@ -8,7 +8,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const maxCacheSize = 1 << 20 // 1MB
+const defaultMaxCacheSize = 1 << 20 // 1MB
 
 type FileRequest struct {
 	RequestID string
@@ -33,7 +33,6 @@ type ShareItem struct {
 	Cache     []byte
 	CacheDone bool
 	Conn      *websocket.Conn
-	mu        sync.Mutex
 	reqCh     chan *FileRequest
 }
 
@@ -63,10 +62,5 @@ func (s *Store) Set(item *ShareItem) {
 func (s *Store) Delete(item *ShareItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if item.Persist {
-		item.Conn = nil
-		item.reqCh = nil
-	} else {
-		delete(s.byShareID, item.ShareID)
-	}
+	delete(s.byShareID, item.ShareID)
 }

@@ -33,21 +33,14 @@ func TestStore_Delete_Persist(t *testing.T) {
 		Token:   "tok1",
 		ShareID: "sid1",
 		Persist: true,
-		Conn:    nil, // would be a real conn in practice
+		Conn:    nil,
 		reqCh:   ch,
 	}
 	s.Set(item)
 	s.Delete(item)
 
-	got := s.GetByShareID("sid1")
-	if got == nil {
-		t.Fatal("GetByShareID should still return item for persist")
-	}
-	if got.Conn != nil {
-		t.Fatal("Conn should be nil after persist delete")
-	}
-	if got.reqCh != nil {
-		t.Fatal("reqCh should be nil after persist delete")
+	if got := s.GetByShareID("sid1"); got != nil {
+		t.Fatal("GetByShareID should return nil after delete, even for persist")
 	}
 }
 

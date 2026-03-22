@@ -324,7 +324,7 @@ func TestIntegration_Persist_DeterministicID(t *testing.T) {
 	}
 }
 
-func TestIntegration_Persist_OrphanSurvives(t *testing.T) {
+func TestIntegration_Persist_CleanupOnDisconnect(t *testing.T) {
 	env := newTestEnv(t, "tok1")
 	conn, resp := env.connectAndRegister("tok1", protocol.Message{
 		FileName: "hello.txt",
@@ -336,16 +336,13 @@ func TestIntegration_Persist_OrphanSurvives(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	item := env.srv.Store.GetByShareID(shareID)
-	if item == nil {
-		t.Fatal("persist item should survive disconnect")
-	}
-	if item.Conn != nil {
-		t.Fatal("Conn should be nil after disconnect")
+	if item != nil {
+		t.Fatal("persist item should be removed on disconnect")
 	}
 
 	httpResp := httpGet(t, env.downloadURL(shareID, "hello.txt"))
 	if httpResp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 for orphan, got %d", httpResp.StatusCode)
+		t.Fatalf("expected 404, got %d", httpResp.StatusCode)
 	}
 	httpResp.Body.Close()
 }
