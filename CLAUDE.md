@@ -48,7 +48,14 @@ go test ./server/... -v -race -count=1  # Run all server tests
 - `config/` — JSON config loading/saving with defaults
 - `tunnel/` — Cloudflare tunnel process wrapper (parses tunnel URL from stderr)
 
+## Design Principles
+
+- **No disk storage/cache** — everything stays in memory or streams through, by design
+- **Personal use tool** — not designed for massive deployment, only for personal usage
+- **Keep everything dead simple but flexible**
+- **Persist mode** means "fixed share ID across client sessions", not "cache entry forever" — persist shares are cleaned up on disconnect just like non-persist shares
+
 ## Configuration
 
-- `liveshare.json` — Server config (hostname, listen addr, port, cloudflare token, token file path)
+- `liveshare.json` — Server config (hostname, listen addr, port, cloudflare token, token file path, max cache size)
 - `tokens.txt` — One token per line, optional tab-separated name (`token\tname`)
