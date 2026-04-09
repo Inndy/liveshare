@@ -197,6 +197,7 @@ func (s *Server) processFileRequest(item *ShareItem, req *FileRequest, msgCh <-c
 
 			if m.msgType == websocket.BinaryMessage {
 				if shouldCache {
+					item.cacheMu.Lock()
 					remaining := maxCache - len(item.Cache)
 					if remaining > 0 {
 						toCache := m.data
@@ -208,6 +209,7 @@ func (s *Server) processFileRequest(item *ShareItem, req *FileRequest, msgCh <-c
 							item.CacheDone = true
 						}
 					}
+					item.cacheMu.Unlock()
 				}
 
 				if _, err := req.Writer.Write(m.data); err != nil {

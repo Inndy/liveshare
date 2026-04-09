@@ -62,10 +62,13 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	var cacheLen int64
 	if !item.NoCache && !item.DirMode {
-		cacheLen = int64(len(item.Cache))
+		item.cacheMu.RLock()
+		cache := item.Cache
+		item.cacheMu.RUnlock()
+		cacheLen = int64(len(cache))
 		if cacheLen > 0 {
 			setDownloadHeaders(w, item, item.MimeType, forceDl)
-			if _, err := w.Write(item.Cache); err != nil {
+			if _, err := w.Write(cache); err != nil {
 				slog.Error("write cache failed", "err", err)
 				return
 			}

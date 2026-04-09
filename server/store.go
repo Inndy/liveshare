@@ -30,6 +30,7 @@ type ShareItem struct {
 	Persist   bool
 	DirMode   bool
 	MimeType  string
+	cacheMu   sync.RWMutex
 	Cache     []byte
 	CacheDone bool
 	Conn      *websocket.Conn
